@@ -1,0 +1,52 @@
+name: Build Releases
+on:
+  push:
+    tags:
+      - "w*.*.*"
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.75"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - i686-pc-windows-msvc
+
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Prepare
+        shell: bash
+        run: |
+          cargo install cbindgen
+          mkdir release
+          rustup target add ${{ matrix.target }}
+
+      - name: Build
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          cargo build --all-features --release --target ${{ matrix.target }}
+          cbindgen -c cbindgen.toml -l C --cpp-compat -o ./overtls.h
+          powershell Compress-Archive -Path target/${{ matrix.target }}/release/overtls-bin.exe, ./config.json, ./overtls.h, target/${{ matrix.target }}/release/overtls.dll -DestinationPath release/overtls-${{ matrix.target }}-win7.zip
+
+      - name: Upload
+        if: ${{ !cancelled() }}
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: release/*
+
+      - name: Abort on error
+        if: ${{ failure() }}
+        run: echo "Some of jobs failed" && false
